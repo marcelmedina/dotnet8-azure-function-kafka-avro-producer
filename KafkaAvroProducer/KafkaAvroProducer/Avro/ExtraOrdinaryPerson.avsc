@@ -1,0 +1,27 @@
+﻿{
+  "fields": [
+    {
+      "name": "Id",
+      "type": "int"
+    },
+    {
+      "name": "Name",
+      "type": "string"
+    },
+    {
+      "name": "Age",
+      "type": "int"
+    },
+    {
+      "name": "Email",
+      "type": "string"
+    },
+    {
+      "name": "Address",
+      "type": "string"
+    }
+  ],
+  "name": "ExtraOrdinaryPerson",
+  "namespace": "com.example",
+  "type": "record"
+}
