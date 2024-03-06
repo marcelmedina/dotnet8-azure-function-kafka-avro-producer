@@ -1,1 +1,1 @@
-# dotnet8-azure-function-kafka-producer
+# dotnet8-webapi-kafka-avro-producer
