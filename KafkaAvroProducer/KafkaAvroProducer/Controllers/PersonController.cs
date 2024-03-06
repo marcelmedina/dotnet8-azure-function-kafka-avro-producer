@@ -1,4 +1,6 @@
-﻿using com.example;
+﻿using Avro;
+using Avro.Generic;
+using com.example;
 using Confluent.Kafka;
 using Confluent.SchemaRegistry;
 using Confluent.SchemaRegistry.Serdes;
@@ -18,9 +20,9 @@ namespace KafkaAvroProducer.Controllers
     {
         private readonly ILogger<PersonController> _logger = LoggerFactoryExtensions.CreateLogger<PersonController>(loggerFactory);
 
-        // POST api/<PersonController>
-        [HttpPost]
-        public async Task<IActionResult> PostAsync([FromBody] OrdinaryPerson ordinaryPerson)
+        // POST api/<PersonController>/specific
+        [HttpPost("/specific")]
+        public async Task<IActionResult> PostSpecificAsync([FromBody] OrdinaryPerson ordinaryPerson)
         {
             string resultMessage;
 
@@ -33,16 +35,14 @@ namespace KafkaAvroProducer.Controllers
                 var schemaRegistryConfig = new SchemaRegistryConfig
                 {
                     // Note: you can specify more than one schema registry url using the
-                    // schema.registry.url property for redundancy (comma separated list). 
-                    Url = configuration.GetSection("ConfluentCloud:SchemaRegistryUrl").Value,                    
-                    BasicAuthCredentialsSource = AuthCredentialsSource.UserInfo,                    
+                    // schema.registry.url property for redundancy (comma separated list).
+                    Url = configuration.GetSection("ConfluentCloud:SchemaRegistryUrl").Value,
+                    BasicAuthCredentialsSource = AuthCredentialsSource.UserInfo,
                     BasicAuthUserInfo = $"{schemaRegistryApiKey}:{schemaRegistryApiSecret}"
                 };
 
                 var avroSerializerConfig = new AvroSerializerConfig
                 {
-                    // optional Avro serializer properties:
-                    BufferBytes = 100,
                     SubjectNameStrategy = SubjectNameStrategy.Record // do not bind the schema to the topic
                 };
 
@@ -69,12 +69,78 @@ namespace KafkaAvroProducer.Controllers
                         });
 
                     _logger.LogInformation($"Status: {result.Status}");
-                    _logger.LogInformation($"Produced to: {result.TopicPartitionOffset}");
+                    _logger.LogInformation($"TopicPartition: {result.Partition}");
+                    _logger.LogInformation($"TopicPartitionOffset: {result.TopicPartitionOffset}");
                 }
 
                 return Ok();
             }
             catch (ProduceException<string, ExtraOrdinaryPerson> ex)
+            {
+                resultMessage =
+                    $"Failed to deliver message: {ex.Message} [{ex.Error.Code}] for message (value: '{ex.DeliveryResult.Value}')";
+
+                _logger.LogError(ex, resultMessage);
+
+                return StatusCode(500, resultMessage);
+            }
+        }
+
+        // POST api/<PersonController>/specific
+        [HttpPost("/generic")]
+        public async Task<IActionResult> PostGenericAsync([FromBody] OrdinaryPerson ordinaryPerson)
+        {
+            string resultMessage;
+
+            try
+            {
+                var record = new GenericRecord((RecordSchema)ExtraOrdinaryPerson._SCHEMA);
+                record.Add("Id", ordinaryPerson.Id);
+                record.Add("Name", ordinaryPerson.Name);
+                record.Add("Age", ordinaryPerson.Age);
+                record.Add("Email", ordinaryPerson.Email);
+                record.Add("Address", ordinaryPerson.Address);
+
+                var topicName = configuration.GetSection("ConfluentCloud:Topic").Value;
+                var schemaRegistryApiKey = configuration.GetSection("ConfluentCloud:SchemaRegistryApiKey").Value;
+                var schemaRegistryApiSecret = configuration.GetSection("ConfluentCloud:SchemaRegistryApiSecret").Value;
+
+                var schemaRegistryConfig = new SchemaRegistryConfig
+                {
+                    // Note: you can specify more than one schema registry url using the
+                    // schema.registry.url property for redundancy (comma separated list). 
+                    Url = configuration.GetSection("ConfluentCloud:SchemaRegistryUrl").Value,
+                    BasicAuthCredentialsSource = AuthCredentialsSource.UserInfo,
+                    BasicAuthUserInfo = $"{schemaRegistryApiKey}:{schemaRegistryApiSecret}"
+                };
+
+                var avroSerializerConfig = new AvroSerializerConfig
+                {
+                    SubjectNameStrategy = SubjectNameStrategy.Record // do not bind the schema to the topic
+                };
+
+                using (var schemaRegistry = new CachedSchemaRegistryClient(schemaRegistryConfig))
+                using (var producer =
+                                new ProducerBuilder<string, GenericRecord>(producerConfig)
+                                    .SetValueSerializer(new AvroSerializer<GenericRecord>(schemaRegistry, avroSerializerConfig))
+                                    .Build())
+                {
+                    var result = await producer
+                        .ProduceAsync(topicName, new Message<string, GenericRecord>
+                        {
+                            Key = ordinaryPerson.Id.ToString(),
+                            Value = record
+                        });
+
+                    _logger.LogInformation($"Status: {result.Status}");
+                    _logger.LogInformation($"TopicPartition: {result.Partition}");
+                    _logger.LogInformation($"TopicPartitionOffset: {result.TopicPartitionOffset}");
+                }
+
+                return Ok();
+
+            }
+            catch (ProduceException<string, GenericRecord> ex)
             {
                 resultMessage =
                     $"Failed to deliver message: {ex.Message} [{ex.Error.Code}] for message (value: '{ex.DeliveryResult.Value}')";
